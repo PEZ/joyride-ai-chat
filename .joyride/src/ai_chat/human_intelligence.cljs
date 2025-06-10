@@ -17,12 +17,10 @@
     (set! (.-title quick-pick) question)
     (set! (.-placeholder quick-pick) question-elaboration)
     (set! (.-ignoreFocusOut quick-pick) true)
-    (set! (.-items quick-pick) (clj->js items))
+    (set! (.-items quick-pick) (clj->js (conj items {:label "Other ..."})))
     (when canSelectMany
       (set! (.-canSelectMany quick-pick) true))
 
-    (def quick-pick quick-pick)
-    (def !timeout-id !state)
     (.show quick-pick)
 
     (p/create
@@ -32,18 +30,31 @@
                                            (swap! !state assoc ::timed-out true)
                                            (.dispose quick-pick))
                                          3000))
+       (js/setTimeout (fn []
+                        (println "ready")
+                        (swap! !state assoc ::ready? true))
+                      32)
        (.onDidAccept quick-pick
                      (fn []
-                       (swap! !state assoc ::selected-items (seq (.-selectedItems quick-pick)))
+                       (swap! !state assoc ::selected-items (seq (js->clj (.-selectedItems quick-pick)
+                                                                          :keywordize-keys true)))
                        (.dispose quick-pick)))
+       (.onDidChangeActive quick-pick
+                           (fn []
+                             (when (::ready? @!state)
+                               (js/clearTimeout (::timeout-id @!state)))))
        (.onDidHide quick-pick
                    (fn []
                      (js/clearTimeout (::timeout-id @!state))
-                     (resolve
-                      (cond
-                        (::timed-out @!state) :hi/timeout
-                        (::selected-items @!state) (::selected-items @!state)
-                        :else :hi/cancelled))))))))
+                     (if-not (some #{"Other ..."} (map :label (::selected-items @!state)))
+                       (resolve
+                        (cond
+                          (::timed-out @!state) :hi/timeout
+                          (::selected-items @!state) (::selected-items @!state)
+                          :else :hi/cancelled))
+                       (p/let [other (vscode/window.showInputBox #{:title question
+                                                                   :placeholder question-elaboration})]
+                         (resolve (conj (::selected-items @!state) other))))))))))
 
 (comment
   (p/let [answer (ask!+ "hello" "because" [{:label "foo"}
@@ -53,6 +64,5 @@
                                             :description "elaborate on baz"}]
                         :canSelectMany true)]
     (def answer answer))
-  (meta #'ask!+)
   :rcf)
 
